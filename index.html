@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
 <meta name="description" content="写真を入れるだけで、機材と露出をのせたSNS向けの画像に。写真は端末の中だけで処理します。">
 <title>撮影設定カード</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -63,6 +65,7 @@ h1 { margin: 0; font-weight: 900; font-size: clamp(2rem, 5vw, 3.1rem); line-heig
 @media (max-width: 860px) { .stage { position: static; } }
 .canvas-box { position: relative; display: grid; place-items: center; background: #08090a; border-radius: 8px; min-height: 220px; padding: 14px; }
 .stage canvas { width: 100%; height: auto; max-height: 70vh; object-fit: contain; display: block; box-shadow: 0 10px 40px rgba(0,0,0,.55); }
+.pv-error { position: absolute; inset: auto 12px 12px 12px; font-size: .8rem; background: rgba(20,10,8,.92); color: var(--err); border: 1px solid var(--err); padding: 8px 10px; border-radius: 6px; }
 .loading { position: absolute; inset: auto 10px 10px auto; font-size: .76rem; background: var(--raise); color: var(--muted); padding: 2px 8px; border-radius: 4px; }
 .stage-meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px; font-family: var(--font-mono); font-size: .74rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 .strip-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: .8rem; color: var(--muted); }
@@ -117,9 +120,33 @@ input[type="text"]::placeholder { color: #5c6067; }
 .outinfo b { color: var(--fg); font-weight: 500; }
 .msg { font-size: .82rem; min-height: 1.4em; color: var(--muted); }
 .msg.err { color: var(--err); }
+.msg:empty { min-height: 0; }
 progress { width: 100%; accent-color: var(--accent); }
 .out img { width: 100%; max-width: 200px; border-radius: 4px; border: 1px solid var(--line); }
 .hint { font-size: .76rem; color: var(--muted); margin: 0; }
+
+/* ---- デザインの見本(いまの写真で描いた小さなプレビュー) ---- */
+.tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 420px) { .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.tile { font: inherit; display: grid; gap: 4px; justify-items: center; padding: 6px 4px 5px; border: 1.5px solid var(--line); border-radius: 10px; background: var(--raise); color: var(--muted); cursor: pointer; transition: border-color .15s, color .15s; min-width: 0; }
+.tile canvas { width: 100%; height: 92px; object-fit: contain; display: block; }
+.tile span { font-size: .72rem; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.tile:hover { border-color: var(--muted); }
+.tile[aria-pressed="true"] { border-color: var(--accent); color: var(--fg); }
+.tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* ---- 折りたたみ ---- */
+details.more { border-top: 1px solid var(--line); padding-top: 8px; }
+details.more > summary { cursor: pointer; font-size: .82rem; color: var(--muted); list-style: none; display: flex; align-items: center; gap: 6px; }
+details.more > summary::-webkit-details-marker { display: none; }
+details.more > summary::before { content: "＋"; font-family: var(--font-mono); color: var(--accent); width: 1em; }
+details.more[open] > summary::before { content: "−"; }
+details.more > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+details.more .sum { font-family: var(--font-mono); font-size: .74rem; }
+.more-body { display: grid; gap: 12px; padding-top: 10px; }
+.more-body .seg-label { display: block; margin-bottom: 6px; }
+.auto { font-family: var(--font-mono); font-size: .78rem; color: var(--muted); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; overflow-wrap: anywhere; }
+.auto b { color: var(--ok); font-weight: 500; font-family: var(--font-body); }
+.auto.warn b { color: var(--warn); }
 
 /* ---- 下の注意書き(控えめに) ---- */
 .foot { border-top: 1px solid var(--line); padding-top: 14px; display: grid; gap: 4px; font-size: .74rem; color: var(--muted); line-height: 1.7; }
@@ -147,6 +174,7 @@ progress { width: 100%; accent-color: var(--accent); }
       <div class="canvas-box">
         <canvas id="cv" width="1080" height="1350" aria-label="書き出しプレビュー"></canvas>
         <span class="loading" id="loading" hidden>読み込み中…</span>
+        <span class="pv-error" id="pvError" hidden>この写真を高画質で開けませんでした。端末のメモリ不足の可能性があります。ほかのアプリやタブを閉じてから、もう一度サムネイルをタップしてください。</span>
       </div>
       <div class="stage-meta"><span id="sizeLabel">—</span><span id="srcLabel">—</span></div>
     </section>
@@ -157,8 +185,7 @@ progress { width: 100%; accent-color: var(--accent); }
         <label class="drop" id="drop">
           <input type="file" id="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/*" multiple>
           <strong>写真を選ぶ(複数可)</strong>
-          <span>ページのどこにドロップしても追加できます</span>
-          <span>最大30枚・1枚100MBまで・JPEG / PNG / WebP</span>
+          <span>ドロップでも追加できます ・ 最大30枚</span>
         </label>
         <div class="row">
           <button type="button" class="btn small" id="clearAll">写真をすべて外す</button>
@@ -167,80 +194,91 @@ progress { width: 100%; accent-color: var(--accent); }
       </div>
 
       <div class="group">
-        <h2><span class="n">02</span>デザイン <small>全部の写真に共通</small></h2>
-        <div class="seg" role="group" aria-label="テンプレート">
-          <button type="button" data-tpl="band" aria-pressed="true">フィルム帯</button>
-          <button type="button" data-tpl="overlay" aria-pressed="false">オーバーレイ</button>
-          <button type="button" data-tpl="finder" aria-pressed="false">ファインダー</button>
+        <h2><span class="n">02</span>デザインを選ぶ <small>全部の写真に共通</small></h2>
+        <div class="tiles" role="group" aria-label="テンプレート">
+          <button type="button" class="tile" data-tpl="band" aria-pressed="true"><canvas data-tile="band" width="216" height="270"></canvas><span>フィルム帯</span></button>
+          <button type="button" class="tile" data-tpl="spec" aria-pressed="false"><canvas data-tile="spec" width="216" height="270"></canvas><span>スペック</span></button>
+          <button type="button" class="tile" data-tpl="overlay" aria-pressed="false"><canvas data-tile="overlay" width="216" height="270"></canvas><span>オーバーレイ</span></button>
+          <button type="button" class="tile" data-tpl="finder" aria-pressed="false"><canvas data-tile="finder" width="216" height="270"></canvas><span>ファインダー</span></button>
+          <button type="button" class="tile" data-tpl="film" aria-pressed="false"><canvas data-tile="film" width="216" height="270"></canvas><span>フィルム</span></button>
         </div>
-        <span class="seg-label">仕上がりの形</span>
         <div class="seg" role="group" aria-label="比率">
           <button type="button" data-ratio="orig" aria-pressed="true">写真のまま</button>
           <button type="button" data-ratio="4:5" aria-pressed="false">4:5</button>
           <button type="button" data-ratio="1:1" aria-pressed="false">1:1</button>
           <button type="button" data-ratio="9:16" aria-pressed="false">9:16</button>
         </div>
-        <div id="fitWrap" hidden>
-          <span class="seg-label">写真と形が違うとき</span>
-          <div class="seg" role="group" aria-label="写真の収め方" style="margin-top:8px">
-            <button type="button" data-fit="contain" aria-pressed="true">全体を収める</button>
-            <button type="button" data-fit="cover" aria-pressed="false">切り抜いて埋める</button>
+        <details class="more">
+          <summary>細かい設定</summary>
+          <div class="more-body">
+            <div id="frameWrap">
+              <span class="seg-label">フチの色</span>
+              <div class="seg" role="group" aria-label="フチの色">
+                <button type="button" data-frame="white" aria-pressed="true">白</button>
+                <button type="button" data-frame="black" aria-pressed="false">黒</button>
+              </div>
+            </div>
+            <div id="fitWrap" hidden>
+              <span class="seg-label">写真と形が違うとき</span>
+              <div class="seg" role="group" aria-label="写真の収め方">
+                <button type="button" data-fit="contain" aria-pressed="true">全体を収める</button>
+                <button type="button" data-fit="cover" aria-pressed="false">切り抜いて埋める</button>
+              </div>
+            </div>
+            <div id="shadeWrap" hidden>
+              <span class="seg-label">文字の下地</span>
+              <div class="seg" role="group" aria-label="文字の下地">
+                <button type="button" data-shade="auto" aria-pressed="true">明るさに合わせて自動</button>
+                <button type="button" data-shade="strong" aria-pressed="false">濃い帯で固定</button>
+              </div>
+            </div>
+            <div>
+              <span class="seg-label">載せる項目</span>
+              <div class="fields">
+                <label><input type="checkbox" id="f-body" checked> ボディ</label>
+                <label><input type="checkbox" id="f-lens" checked> レンズ</label>
+                <label><input type="checkbox" id="f-focal" checked> 焦点距離</label>
+                <label><input type="checkbox" id="f-exp" checked> F・SS・ISO</label>
+                <label><input type="checkbox" id="f-caption" checked> ひとこと</label>
+                <label><input type="checkbox" id="f-place" checked> 撮影地</label>
+                <label><input type="checkbox" id="f-date"> 撮影日</label>
+              </div>
+            </div>
           </div>
-        </div>
-        <div id="shadeWrap" hidden>
-          <span class="seg-label">文字の下地</span>
-          <div class="seg" role="group" aria-label="文字の下地" style="margin-top:8px">
-            <button type="button" data-shade="auto" aria-pressed="true">明るさに合わせて自動</button>
-            <button type="button" data-shade="strong" aria-pressed="false">濃い帯で固定</button>
-          </div>
-        </div>
-        <span class="seg-label">載せる項目</span>
-        <div class="fields">
-          <label><input type="checkbox" id="f-body" checked> ボディ</label>
-          <label><input type="checkbox" id="f-lens" checked> レンズ</label>
-          <label><input type="checkbox" id="f-focal" checked> 焦点距離</label>
-          <label><input type="checkbox" id="f-exp" checked> F・SS・ISO</label>
-          <label><input type="checkbox" id="f-caption" checked> ひとこと</label>
-          <label><input type="checkbox" id="f-place" checked> 撮影地</label>
-          <label><input type="checkbox" id="f-date"> 撮影日</label>
-        </div>
+        </details>
       </div>
 
       <div class="group">
-        <h2><span class="n">03</span>撮影情報 <small>写真から自動で入ります・書き換えも可</small></h2>
+        <h2><span class="n">03</span>ひとことを添える <small>任意・この写真だけ</small></h2>
         <div class="edit">
           <label class="wide">ひとこと<input type="text" id="v-caption" maxlength="40" autocomplete="off" placeholder="例: 朝いちばんの新雪"></label>
-          <label class="wide">撮影地(任意・自分で入力した場合だけ載ります)<input type="text" id="v-place" maxlength="30" autocomplete="off" placeholder="例: 上高地"></label>
-          <label class="wide">ボディ<input type="text" id="v-body" autocomplete="off"></label>
-          <label class="wide">レンズ<input type="text" id="v-lens" autocomplete="off"></label>
-          <label>焦点距離<input type="text" id="v-focal" autocomplete="off"></label>
-          <label>絞り<input type="text" id="v-f" autocomplete="off"></label>
-          <label>シャッター<input type="text" id="v-ss" autocomplete="off"></label>
-          <label>ISO<input type="text" id="v-iso" autocomplete="off"></label>
-          <label class="wide">撮影日<input type="text" id="v-date" autocomplete="off"></label>
+          <label class="wide">撮影地(入力したときだけ載ります)<input type="text" id="v-place" maxlength="30" autocomplete="off" placeholder="例: 上高地"></label>
         </div>
-        <div class="row">
-          <button type="button" class="btn small" id="copyAll">ボディ・レンズを全部の写真に</button>
-          <button type="button" class="btn small" id="copyPlace">撮影地を全部の写真に</button>
-          <span class="msg" id="copyMsg" role="status"></span>
-        </div>
+        <div class="row"><button type="button" class="btn small" id="copyPlace">この撮影地を全部の写真に</button></div>
+        <div class="auto" id="autoSummary"></div>
+        <details class="more" id="editDetails">
+          <summary>機材・設定値を確認・修正</summary>
+          <div class="more-body">
+            <div class="edit">
+              <label class="wide">ボディ<input type="text" id="v-body" autocomplete="off"></label>
+              <label class="wide">レンズ<input type="text" id="v-lens" autocomplete="off"></label>
+              <label>焦点距離<input type="text" id="v-focal" autocomplete="off"></label>
+              <label>絞り<input type="text" id="v-f" autocomplete="off"></label>
+              <label>シャッター<input type="text" id="v-ss" autocomplete="off"></label>
+              <label>ISO<input type="text" id="v-iso" autocomplete="off"></label>
+              <label class="wide">撮影日<input type="text" id="v-date" autocomplete="off"></label>
+            </div>
+            <div class="row">
+              <button type="button" class="btn small" id="copyAll">ボディ・レンズを全部の写真に</button>
+            </div>
+          </div>
+        </details>
+        <span class="msg" id="copyMsg" role="status"></span>
         <div class="status" id="status"></div>
       </div>
 
       <div class="group out">
         <h2><span class="n">04</span>保存</h2>
-        <span class="seg-label">画質</span>
-        <div class="seg" role="group" aria-label="書き出しサイズ">
-          <button type="button" data-size="sns" aria-pressed="false">SNS向け(幅1080)</button>
-          <button type="button" data-size="hq" aria-pressed="false">高画質(幅2160)</button>
-          <button type="button" data-size="orig" aria-pressed="true">元の画素数を保つ</button>
-        </div>
-        <span class="seg-label">形式</span>
-        <div class="seg" role="group" aria-label="ファイル形式">
-          <button type="button" data-fmt="jpg" aria-pressed="true">JPEG(高品質・軽い)</button>
-          <button type="button" data-fmt="png" aria-pressed="false">PNG(劣化なし・重い)</button>
-        </div>
-        <div class="outinfo" id="outInfo"></div>
         <div class="row">
           <button type="button" class="btn primary" id="saveOne">この写真を保存</button>
           <button type="button" class="btn" id="saveAll">全部まとめて保存(ZIP)</button>
@@ -248,6 +286,27 @@ progress { width: 100%; accent-color: var(--accent); }
         <progress id="prog" max="1" value="0" hidden></progress>
         <div class="msg" id="saveMsg" role="status"></div>
         <img id="outImg" alt="書き出した画像" hidden>
+        <details class="more">
+          <summary>保存の設定 <span class="sum" id="saveSummary"></span></summary>
+          <div class="more-body">
+            <div>
+              <span class="seg-label">画質</span>
+              <div class="seg" role="group" aria-label="書き出しサイズ">
+                <button type="button" data-size="orig" aria-pressed="true">元の画素数を保つ</button>
+                <button type="button" data-size="hq" aria-pressed="false">高画質(幅2160)</button>
+                <button type="button" data-size="sns" aria-pressed="false">SNS向け(幅1080)</button>
+              </div>
+            </div>
+            <div>
+              <span class="seg-label">形式</span>
+              <div class="seg" role="group" aria-label="ファイル形式">
+                <button type="button" data-fmt="jpg" aria-pressed="true">JPEG(高品質・軽い)</button>
+                <button type="button" data-fmt="png" aria-pressed="false">PNG(劣化なし・重い)</button>
+              </div>
+            </div>
+          </div>
+        </details>
+        <div class="outinfo" id="outInfo"></div>
         <p class="hint">保存できない環境では、上の画像を長押し(右クリック)して保存できます。</p>
       </div>
     </div>
@@ -269,8 +328,8 @@ progress { width: 100%; accent-color: var(--accent); }
   var MAX_AREA = IS_IOS ? 16000000 : 60000000, MAX_SIDE = IS_IOS ? 4096 * 3 : 16000;
   var $ = function (id) { return document.getElementById(id); };
   var cv = $("cv");
-  var S = { tpl: "band", ratio: "orig", fit: "contain", shade: "auto", size: "orig", fmt: "jpg" };
-  var items = [], cur = 0, nextId = 1, previewSrc = null, busy = false, dragDepth = 0;
+  var S = { tpl: "band", ratio: "orig", fit: "contain", shade: "auto", size: "orig", fmt: "jpg", frame: "white" };
+  var items = [], cur = 0, nextId = 1, previewSrc = null, previewFull = false, busy = false, dragDepth = 0, reqSeq = 0;
 
   /* ================= 架空のサンプル(写真はその場で描画) ================= */
   function mulberry(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
@@ -464,11 +523,40 @@ progress { width: 100%; accent-color: var(--accent); }
     return c;
   }
   function makeThumb(src, w, h) { return downscale(src, w, h, 160).toDataURL("image/jpeg", .8); }
+  // プレビュー用:最初から縮小して読み込む(大きな写真を毎回フルサイズで開かないので、スマホでもメモリが尽きにくい)
+  function decodePreview(it) {
+    var k = Math.min(1, PREVIEW_EDGE / Math.max(it.w, it.h));
+    var tw = Math.max(1, Math.round(it.w * k)), th = Math.max(1, Math.round(it.h * k));
+    var viaFull = function () {
+      return decode(it.file).then(function (d) {
+        try { return downscale(d.src, d.w, d.h, PREVIEW_EDGE); } finally { d.close(); }
+      });
+    };
+    if (!window.createImageBitmap || k === 1) return viaFull();
+    return createImageBitmap(it.file, { resizeWidth: tw, resizeHeight: th, resizeQuality: "high" }).then(function (bm) {
+      if ((bm.width > bm.height) !== (it.w > it.h) && it.w !== it.h) { bm.close(); return viaFull(); } // 向きが合わない環境は通常の方法で
+      return bm;
+    }, viaFull);
+  }
+  function thumbCanvas(it) {
+    var c = document.createElement("canvas"), im = new Image();
+    c.width = 1; c.height = 1;
+    return new Promise(function (res) {
+      im.onload = function () { c.width = im.naturalWidth; c.height = im.naturalHeight; c.getContext("2d").drawImage(im, 0, 0); res(c); };
+      im.onerror = function () { res(null); };
+      im.src = it.thumb;
+    });
+  }
+  function releasePreview() {
+    if (previewSrc && previewSrc.close && !(previewSrc instanceof HTMLCanvasElement)) { try { previewSrc.close(); } catch (e) {} }
+    else if (previewSrc instanceof HTMLCanvasElement && previewSrc !== (items[cur] && items[cur].canvas)) { /* 小さいキャンバスはGCに任せる */ }
+    previewSrc = null;
+  }
 
   function hideVeil() { dragDepth = 0; $("dropveil").hidden = true; }
   function addFiles(list) {
     hideVeil();
-    if (busy) return;
+    if (busy) { setMsg("addMsg", "読み込み中または保存中です。終わってからもう一度追加してください", true); return; }
     var files = Array.prototype.slice.call(list || []);
     if (!files.length) return;
     if (isSampleMode()) { items = []; cur = 0; }
@@ -553,46 +641,60 @@ progress { width: 100%; accent-color: var(--accent); }
   }
   function selectItem(i) {
     cur = i;
+    var my = ++reqSeq;
     document.querySelectorAll(".thumb").forEach(function (t, k) { t.setAttribute("aria-current", k === i ? "true" : "false"); });
     var it = items[i];
     fillInputs(it);
     $("outImg").hidden = true; setMsg("saveMsg", "");
-    previewSrc = null;
-    if (it.kind === "sample") { previewSrc = it.canvas; render(); return; }
+    $("pvError").hidden = true;
+    releasePreview(); previewFull = false;
+    if (it.kind === "sample") { previewSrc = it.canvas; previewFull = true; render(); syncSaveBtn(); return; }
+    syncSaveBtn();
     $("loading").hidden = false;
-    var myId = it.id;
-    decode(it.file).then(function (d) {
-      var c = downscale(d.src, d.w, d.h, PREVIEW_EDGE); d.close();
-      if (items[cur] && items[cur].id === myId) { previewSrc = c; render(); }
-    }).catch(function () { setMsg("saveMsg", "この写真を開けませんでした", true); })
-      .then(function () { $("loading").hidden = true; });
+    // まずサムネイルで即座に切り替え(古い写真が残らないように)、そのあと高精細版に差し替える
+    thumbCanvas(it).then(function (tc) { if (my === reqSeq && !previewFull && tc) { previewSrc = tc; render(); } });
+    (function attempt(n) {
+      decodePreview(it).then(function (src) {
+        if (my !== reqSeq) { if (src.close) src.close(); return; }
+        releasePreview(); previewSrc = src; previewFull = true; render();
+        $("loading").hidden = true; syncSaveBtn();
+      }).catch(function () {
+        if (my !== reqSeq) return;
+        if (n < 1) { setTimeout(function () { if (my === reqSeq) attempt(n + 1); }, 400); return; }
+        $("loading").hidden = true; $("pvError").hidden = false; syncSaveBtn();
+      });
+    })(0);
   }
+  function syncSaveBtn() { if (!busy) $("saveOne").disabled = !previewFull; }
   var FIELDS = ["caption", "place", "body", "lens", "focal", "f", "ss", "iso", "date"];
   function fillInputs(it) { FIELDS.forEach(function (k) { $("v-" + k).value = it.vals[k] || ""; }); }
 
   /* ================= 描画(基準幅1080で組み、倍率sで書き出す) ================= */
   var RATIOS = { "4:5": 1350 / 1080, "1:1": 1, "9:16": 1920 / 1080 };
-  var BAND = 230, PAD = 48, BAR = 120;
+  // テンプレートごとの余白(上・左右・下)
+  var MARGINS = {
+    band: { top: 48, side: 48, bottom: 230 }, spec: { top: 48, side: 48, bottom: 330 },
+    film: { top: 100, side: 40, bottom: 100 }, overlay: { top: 0, side: 0, bottom: 0 }, finder: { top: 0, side: 0, bottom: 120 }
+  };
+  var FRAMED = { band: 1, spec: 1 };
   var DISP = '600 {s}px "Barlow Condensed", "Arial Narrow", sans-serif';
   var MONO = '500 {s}px "IBM Plex Mono", monospace';
   var JP = '500 {s}px "Zen Kaku Gothic New", sans-serif';
   function F(t, s) { return t.replace("{s}", s); }
 
   function layout(iw, ih) {
-    var W = 1080, H, r = ih / iw;
-    if (S.tpl === "band") H = S.ratio === "orig" ? PAD + (W - PAD * 2) * r + BAND : W * RATIOS[S.ratio];
-    else if (S.tpl === "finder") H = S.ratio === "orig" ? W * r + BAR : W * RATIOS[S.ratio];
-    else H = S.ratio === "orig" ? W * r : W * RATIOS[S.ratio];
+    var W = 1080, H, r = ih / iw, m = MARGINS[S.tpl];
+    H = S.ratio === "orig" ? m.top + (W - m.side * 2) * r + m.bottom : W * RATIOS[S.ratio];
     H = Math.round(Math.max(600, Math.min(2600, H)));
-    var box = S.tpl === "band" ? { x: PAD, y: PAD, w: W - PAD * 2, h: H - BAND - PAD }
-      : S.tpl === "finder" ? { x: 0, y: 0, w: W, h: H - BAR } : { x: 0, y: 0, w: W, h: H };
+    var box = { x: m.side, y: m.top, w: W - m.side * 2, h: H - m.top - m.bottom };
     var fit = S.ratio === "orig" ? "contain" : S.fit;
     var k = fit === "cover" ? Math.max(box.w / iw, box.h / ih) : Math.min(box.w / iw, box.h / ih);
-    return { W: W, H: H, box: box, fit: fit, k: k };
+    return { W: W, H: H, box: box, fit: fit, k: k, m: m };
   }
   // 書き出し倍率。「元の画素数」は写真部分が元写真と同じ画素数になる倍率
-  function exportScale(L) {
-    var s = S.size === "sns" ? 1 : S.size === "hq" ? 2 : 1 / L.k;
+  function exportScale(L, sizeOverride) {
+    var size = sizeOverride || S.size;
+    var s = size === "sns" ? 1 : size === "hq" ? 2 : 1 / L.k;
     s = Math.max(1, s);
     var capArea = Math.sqrt(MAX_AREA / (L.W * L.H)), capSide = MAX_SIDE / Math.max(L.W, L.H);
     var capped = s > Math.min(capArea, capSide);
@@ -601,9 +703,10 @@ progress { width: 100%; accent-color: var(--accent); }
   }
 
   function draw(canvas, it, src, srcW, srcH, s) {
-    var L = layout(it.w, it.h), W = L.W, H = L.H, b = L.box;
+    var L = layout(it.w, it.h), W = L.W, H = L.H, b = L.box, M = L.m;
     canvas.width = Math.round(W * s); canvas.height = Math.round(H * s);
     var ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) throw new Error("canvas");
     ctx.setTransform(s, 0, 0, s, 0, 0);
     ctx.imageSmoothingQuality = "high";
     var v = {}; FIELDS.forEach(function (k) { v[k] = (it.vals[k] || "").trim(); });
@@ -614,12 +717,17 @@ progress { width: 100%; accent-color: var(--accent); }
     var body = on("f-body") ? v.body : "", lens = on("f-lens") ? v.lens : "";
     var date = on("f-date") ? v.date : "", cap = on("f-caption") ? v.caption : "", place = on("f-place") ? v.place : "";
     var lum = null;
+    var white = S.frame !== "black";
+    var paper = white ? "#f5f3ef" : "#141517";
+    var ink = white ? "#1c1d20" : "#eeece6", sub = white ? "#6a6c70" : "#9a9da3";
 
     function fitText(t, font, size, maxW, x, y) {
+      if (!t) return;
       ctx.font = F(font, size);
-      while (ctx.measureText(t).width > maxW && size > 16) { size -= 2; ctx.font = F(font, size); }
+      while (ctx.measureText(t).width > maxW && size > 14) { size -= 2; ctx.font = F(font, size); }
       ctx.fillText(t, x, y);
     }
+    function textW(t, font, size) { ctx.font = F(font, size); return t ? ctx.measureText(t).width : 0; }
     function measureLum(x, y, w, h) {
       var X = Math.max(0, Math.round(x * s)), Y = Math.max(0, Math.round(y * s));
       var Wd = Math.max(1, Math.min(canvas.width - X, Math.round(w * s))), Hd = Math.max(1, Math.min(canvas.height - Y, Math.round(h * s)));
@@ -631,7 +739,7 @@ progress { width: 100%; accent-color: var(--accent); }
       return Math.min(1, Math.max(avg, avg * .5 + p90 * .5));
     }
     function photo(bg) {
-      var dw = srcW * (L.k * it.w / srcW), dh = srcH * (L.k * it.h / srcH); // 元写真の寸法で配置(プレビューは縮小版を同じ位置に)
+      var dw = L.k * it.w, dh = L.k * it.h; // 元写真の寸法で配置(プレビューは縮小版を同じ位置に)
       ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
       if (L.fit === "contain") {
         if (bg) { ctx.fillStyle = bg; ctx.fillRect(b.x, b.y, b.w, b.h); }
@@ -646,20 +754,59 @@ progress { width: 100%; accent-color: var(--accent); }
       ctx.drawImage(src, b.x + (b.w - dw) / 2, b.y + (b.h - dh) / 2, dw, dh);
       ctx.restore();
     }
+    function frameBg() { ctx.fillStyle = paper; ctx.fillRect(0, 0, W, H); }
+    var y0 = H - M.bottom, inner = W - M.side * 2;
 
-    ctx.textBaseline = "alphabetic";
+    ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
     if (S.tpl === "band") {
-      ctx.fillStyle = "#f5f3ef"; ctx.fillRect(0, 0, W, H);
-      photo("#f5f3ef");
-      var by = H - BAND;
-      ctx.fillStyle = "#1c1d20"; ctx.textAlign = "left";
-      fitText(parts.join("   "), DISP, 58, W - PAD * 2, PAD, by + 100);
-      ctx.fillStyle = "#c8501e"; ctx.fillRect(PAD, by + 126, 64, 4);
+      frameBg(); photo(paper);
+      ctx.fillStyle = ink;
+      fitText(parts.join("   "), DISP, 58, inner, M.side, y0 + 100);
+      ctx.fillStyle = "#e0602a"; ctx.fillRect(M.side, y0 + 126, 64, 4);
       var left = [body, lens].filter(Boolean).join("  ·  "), right = [cap, place, date].filter(Boolean).join("  ");
-      ctx.font = F(JP, 26); var rw = right ? Math.min(ctx.measureText(right).width, (W - PAD * 2) * .45) : 0;
-      ctx.fillStyle = "#6a6c70";
-      if (left) fitText(left, MONO, 24, W - PAD * 2 - rw - (rw ? 30 : 0), PAD, by + 176);
-      if (right) { ctx.textAlign = "right"; ctx.fillStyle = "#1c1d20"; fitText(right, JP, 26, (W - PAD * 2) * .45, W - PAD, by + 176); }
+      var rw = Math.min(textW(right, JP, 26), inner * .45);
+      ctx.fillStyle = sub; fitText(left, MONO, 24, inner - rw - (rw ? 30 : 0), M.side, y0 + 176);
+      ctx.textAlign = "right"; ctx.fillStyle = ink; fitText(right, JP, 26, inner * .45, W - M.side, y0 + 176);
+    } else if (S.tpl === "spec") {
+      // 計器のように、焦点距離・F値・シャッター・ISOを大きな数字で並べる
+      frameBg(); photo(paper);
+      var cols = [];
+      if (on("f-focal") && v.focal) cols.push(["FOCAL", v.focal]);
+      if (on("f-exp")) {
+        if (v.f) cols.push(["APERTURE", v.f]);
+        if (v.ss) cols.push(["SHUTTER", v.ss]);
+        if (v.iso) cols.push(["ISO", v.iso.replace(/^ISO\s*/i, "")]);
+      }
+      ctx.fillStyle = sub; ctx.fillRect(M.side, y0 + 34, inner, 2);
+      if (cols.length) {
+        var cw = inner / cols.length;
+        cols.forEach(function (c, i) {
+          var cx = M.side + cw * i;
+          if (i) { ctx.fillStyle = white ? "rgba(0,0,0,.14)" : "rgba(255,255,255,.16)"; ctx.fillRect(cx, y0 + 66, 2, 118); }
+          var px = cx + (i ? 26 : 0);
+          ctx.textAlign = "left"; ctx.fillStyle = "#e0602a"; fitText(c[0], MONO, 20, cw - 30, px, y0 + 86);
+          ctx.fillStyle = ink; fitText(c[1], DISP, 84, cw - 34, px, y0 + 172);
+        });
+      }
+      var sl = [body, lens].filter(Boolean).join("  ·  "), sr = [cap, place, date].filter(Boolean).join("  ");
+      var srw = Math.min(textW(sr, JP, 24), inner * .45);
+      ctx.textAlign = "left"; ctx.fillStyle = sub; fitText(sl, MONO, 22, inner - srw - (srw ? 30 : 0), M.side, y0 + 268);
+      ctx.textAlign = "right"; ctx.fillStyle = ink; fitText(sr, JP, 24, inner * .45, W - M.side, y0 + 268);
+    } else if (S.tpl === "film") {
+      ctx.fillStyle = "#121212"; ctx.fillRect(0, 0, W, H);
+      photo("#121212");
+      ctx.fillStyle = "#e9e3d6";
+      for (var hx = 14; hx < W - 20; hx += 48) {
+        roundRect(ctx, hx, 16, 24, 32, 4); roundRect(ctx, hx, H - 48, 24, 32, 4);
+      }
+      var orange = "#ff9a3c", idx = items.indexOf(it) + 1;
+      ctx.fillStyle = orange;
+      var nb = "▸ " + idx + "A", nbw = textW(nb, MONO, 20);
+      fitText([body, lens].filter(Boolean).join("   "), MONO, 20, inner - nbw - 30, M.side, 84);
+      ctx.textAlign = "right"; ctx.font = F(MONO, 20); ctx.fillText(nb, W - M.side, 84);
+      var rt = [cap, place, date].filter(Boolean).join("  "), rtw = Math.min(textW(rt, JP, 22), inner * .45);
+      ctx.textAlign = "left"; fitText(parts.join("   "), DISP, 32, inner - rtw - (rtw ? 30 : 0), M.side, H - 64);
+      ctx.textAlign = "right"; fitText(rt, JP, 22, inner * .45, W - M.side, H - 64);
     } else if (S.tpl === "overlay") {
       photo(null);
       var x = 64, y = H - 210;
@@ -671,12 +818,11 @@ progress { width: 100%; accent-color: var(--accent); }
         g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(.45, "rgba(0,0,0," + (a * .7) + ")"); g.addColorStop(1, "rgba(0,0,0," + a + ")");
         ctx.fillStyle = g; ctx.fillRect(0, top, W, H - top);
       }
-      ctx.fillStyle = "#fff"; ctx.textAlign = "left";
-      if (cap) fitText(cap, JP, 40, W - x * 2, x, y);
+      ctx.fillStyle = "#fff";
+      fitText(cap, JP, 40, W - x * 2, x, y);
       fitText(parts.join("  "), DISP, 92, W - x * 2, x, y + 100);
       ctx.fillStyle = "rgba(255,255,255,.88)";
-      var meta = [body, lens, place, date].filter(Boolean).join("  /  ");
-      if (meta) fitText(meta, MONO, 26, W - x * 2, x, y + 150);
+      fitText([body, lens, place, date].filter(Boolean).join("  /  "), MONO, 26, W - x * 2, x, y + 150);
     } else {
       photo(null);
       var m = 70, Lb = 60;
@@ -692,28 +838,33 @@ progress { width: 100%; accent-color: var(--accent); }
         ctx.beginPath(); ctx.moveTo(c[0], c[1] + Lb * c[3]); ctx.lineTo(c[0], c[1]); ctx.lineTo(c[0] + Lb * c[2], c[1]); ctx.stroke();
       });
       ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(W / 2, b.h / 2, 26, 0, 6.283); ctx.stroke();
-      ctx.fillStyle = "#fff"; ctx.textAlign = "left";
-      var topTxt = [body, lens].filter(Boolean).join("  "), capW = 0;
-      cap = [cap, place].filter(Boolean).join("  ");
-      if (cap) { ctx.font = F(JP, 30); capW = Math.min(ctx.measureText(cap).width, (W - 2 * m) * .4); }
-      if (topTxt) fitText(topTxt, MONO, 24, W - 2 * m - 40 - capW - (capW ? 30 : 0), m + 20, m + 40);
-      if (cap) { ctx.textAlign = "right"; fitText(cap, JP, 30, (W - 2 * m) * .4, W - m - 20, m + 40); }
-      ctx.fillStyle = "#0d0d0e"; ctx.fillRect(0, H - BAR, W, BAR);
+      ctx.fillStyle = "#fff";
+      var topTxt = [body, lens].filter(Boolean).join("  "), capT = [cap, place].filter(Boolean).join("  ");
+      var capW = Math.min(textW(capT, JP, 30), (W - 2 * m) * .4);
+      fitText(topTxt, MONO, 24, W - 2 * m - 40 - capW - (capW ? 30 : 0), m + 20, m + 40);
+      ctx.textAlign = "right"; fitText(capT, JP, 30, (W - 2 * m) * .4, W - m - 20, m + 40);
+      ctx.fillStyle = "#0d0d0e"; ctx.fillRect(0, H - M.bottom, W, M.bottom);
       ctx.textBaseline = "middle"; ctx.textAlign = "right"; ctx.font = F(MONO, 22); ctx.fillStyle = "#e8743f";
       var tag = date || (it.kind === "sample" ? "SAMPLE" : "REC");
-      ctx.fillText(tag, W - 60, H - BAR / 2);
+      ctx.fillText(tag, W - 60, H - M.bottom / 2);
       var tagW = ctx.measureText(tag).width;
       ctx.fillStyle = "#f2f2f2"; ctx.textAlign = "left";
-      fitText(parts.join("   "), DISP, 64, W - 120 - tagW - 40, 60, H - BAR / 2);
+      fitText(parts.join("   "), DISP, 64, W - 120 - tagW - 40, 60, H - M.bottom / 2);
       ctx.textBaseline = "alphabetic";
     }
     if (it.kind === "sample") {
       ctx.textAlign = "right"; ctx.font = F(MONO, 18);
-      ctx.fillStyle = S.tpl === "band" ? "rgba(0,0,0,.35)" : "rgba(255,255,255,.6)";
-      ctx.fillText("SAMPLE IMAGE", W - 30, S.tpl === "band" ? 32 : H - (S.tpl === "finder" ? BAR + 14 : 14));
+      var onFrame = FRAMED[S.tpl];
+      ctx.fillStyle = onFrame ? (white ? "rgba(0,0,0,.35)" : "rgba(255,255,255,.4)") : "rgba(255,255,255,.6)";
+      var sy = onFrame ? Math.max(28, M.top * .6) : S.tpl === "film" ? H - 112 : H - M.bottom - 14;
+      ctx.fillText("SAMPLE IMAGE", W - Math.max(30, M.side), sy);
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     return { L: L, lum: lum };
+  }
+  function roundRect(c, x, y, w, h, r) {
+    c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r);
+    c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); c.fill();
   }
 
   var lastLum = null;
@@ -725,8 +876,34 @@ progress { width: 100%; accent-color: var(--accent); }
     $("sizeLabel").textContent = "プレビュー " + cv.width + " × " + cv.height;
     $("srcLabel").textContent = (it.w > it.h ? "横位置" : it.w < it.h ? "縦位置" : "正方形") + " " + it.w + "×" + it.h + " px";
     $("fitWrap").hidden = S.ratio === "orig";
-    $("shadeWrap").hidden = S.tpl === "band";
-    updateStatus(it); updateOutInfo(it);
+    $("shadeWrap").hidden = !(S.tpl === "overlay" || S.tpl === "finder");
+    $("frameWrap").hidden = !FRAMED[S.tpl];
+    updateStatus(it); updateOutInfo(it); updateAuto(it); scheduleTiles();
+  }
+  function updateAuto(it) {
+    var a = $("autoSummary"), v = it.vals; a.textContent = "";
+    var b = document.createElement("b");
+    var specs = [v.body, v.lens, [v.focal, v.f, v.ss, v.iso].filter(Boolean).join(" ")].filter(Boolean).join(" ・ ");
+    if (it.noExif && !specs) {
+      a.className = "auto warn"; b.textContent = "撮影情報が見つかりません";
+      a.appendChild(b); a.appendChild(document.createTextNode(" ・ 下の「機材・設定値を確認・修正」から入力できます"));
+      $("editDetails").open = true;
+    } else {
+      a.className = "auto"; b.textContent = it.kind === "sample" ? "サンプル " : "自動入力 ";
+      a.appendChild(b); a.appendChild(document.createTextNode(specs || "—"));
+    }
+  }
+  // デザインの見本を、いま選んでいる写真で描く(入力のたびに描き直さないよう少し待つ)
+  var tileTimer = null;
+  function scheduleTiles() { clearTimeout(tileTimer); tileTimer = setTimeout(drawTiles, 180); }
+  function drawTiles() {
+    var it = items[cur]; if (!it || !previewSrc) return;
+    var keep = S.tpl;
+    document.querySelectorAll("canvas[data-tile]").forEach(function (c) {
+      S.tpl = c.getAttribute("data-tile");
+      try { draw(c, it, previewSrc, previewSrc.width, previewSrc.height, 0.2); } catch (e) { /* 見本が描けなくても本体には影響させない */ }
+    });
+    S.tpl = keep;
   }
   function updateStatus(it) {
     var s = $("status"); s.textContent = "";
@@ -734,7 +911,7 @@ progress { width: 100%; accent-color: var(--accent); }
     if (it.gps) line("この写真の位置情報は読み取っていません。撮影地を載せたいときは上の欄に入力してください。");
     if (it.noExif) line("撮影情報が見つかりませんでした。SNSアプリ経由の画像やスクリーンショットは消えていることが多いので、上の欄に手で入力してください。", "warn");
     if (it.equiv) line("スマホの写真なので、焦点距離は35mm判換算の値で表示しています。");
-    if (lastLum != null && S.tpl !== "band") line("文字まわりの明るさ " + Math.round(lastLum * 100) + "% → " + (S.shade === "strong" ? "濃い帯で固定" : lastLum > .55 ? "下地を濃くしています" : "下地は軽めです"));
+    if (lastLum != null && (S.tpl === "overlay" || S.tpl === "finder")) line("文字まわりの明るさ " + Math.round(lastLum * 100) + "% → " + (S.shade === "strong" ? "濃い帯で固定" : lastLum > .55 ? "下地を濃くしています" : "下地は軽めです"));
   }
   function updateOutInfo(it) {
     var L = layout(it.w, it.h), e = exportScale(L);
@@ -745,18 +922,32 @@ progress { width: 100%; accent-color: var(--accent); }
     info.appendChild(document.createTextNode("書き出し ")); info.appendChild(b1);
     info.appendChild(document.createTextNode("  ・  写真部分は元の画素数の " + keep + "%"));
     if (e.capped) info.appendChild(document.createTextNode("(この端末で扱える上限に合わせて縮小)"));
+    $("saveSummary").textContent = "(" + ({ orig: "元の画素数", hq: "高画質", sns: "SNS向け" })[S.size] + "・" + S.fmt.toUpperCase() + ")";
   }
 
   /* ================= 書き出し:canvasから作り直すのでEXIF・余分なデータは一切残らない ================= */
-  function exportItem(it) {
+  function exportAt(it, sizeOverride) {
     var getSrc = it.kind === "sample" ? Promise.resolve({ src: it.canvas, w: it.w, h: it.h, close: function () {} }) : decode(it.file);
     return getSrc.then(function (d) {
-      var L = layout(it.w, it.h), e = exportScale(L), c = document.createElement("canvas");
-      draw(c, it, d.src, d.w, d.h, e.s); d.close();
+      var L = layout(it.w, it.h), e = exportScale(L, sizeOverride), c = document.createElement("canvas");
+      try { draw(c, it, d.src, d.w, d.h, e.s); } catch (err) { c.width = c.height = 0; throw err; } finally { d.close(); }
       return new Promise(function (res, rej) {
         c.toBlob(function (blob) { c.width = c.height = 0; blob ? res(blob) : rej(new Error("encode")); },
           S.fmt === "png" ? "image/png" : "image/jpeg", .95);
       });
+    });
+  }
+  // 書き出しに失敗したら(主にメモリ不足)、一段小さいサイズで自動的にやり直す
+  function exportItem(it) {
+    var fontsReady = document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve();
+    var order = S.size === "orig" ? ["orig", "hq", "sns"] : S.size === "hq" ? ["hq", "sns"] : ["sns"];
+    return fontsReady.then(function () {
+      return (function tryAt(k) {
+        return exportAt(it, order[k]).then(function (blob) { blob.reduced = k > 0; return blob; }, function (err) {
+          if (k + 1 < order.length) return new Promise(function (r) { setTimeout(r, 200); }).then(function () { return tryAt(k + 1); });
+          throw err;
+        });
+      })(0);
     });
   }
   function outName(it, i) {
@@ -806,18 +997,20 @@ progress { width: 100%; accent-color: var(--accent); }
     });
   }
   function setMsg(id, t, isErr) { var el = $(id); el.textContent = t; el.className = "msg" + (isErr ? " err" : ""); }
-  function lock(on) { busy = on; ["saveOne", "saveAll", "clearAll", "file"].forEach(function (id) { $(id).disabled = on; }); if (!on) $("saveAll").disabled = items.length < 2; }
+  function lock(on) { busy = on; ["saveOne", "saveAll", "clearAll", "file"].forEach(function (id) { $(id).disabled = on; }); if (!on) { $("saveAll").disabled = items.length < 2; syncSaveBtn(); } }
 
   $("saveOne").addEventListener("click", function () {
     if (busy) return;
-    var it = items[cur]; lock(true); setMsg("saveMsg", "書き出し中…");
+    var it = items[cur]; if (!it || !previewFull) return;
+    lock(true); setMsg("saveMsg", (items.indexOf(it) + 1) + "枚目を書き出し中…");
     exportItem(it).then(function (blob) {
       var img = $("outImg"); if (img.src) URL.revokeObjectURL(img.src);
       img.src = URL.createObjectURL(blob); img.hidden = false;
       var mb = (blob.size / 1048576).toFixed(1);
       return offer(blob, outName(it)).then(function (r) {
-        setMsg("saveMsg", r === "saved" ? "保存しました(" + mb + "MB・位置情報なし)" : r === "started" ? "保存を始めました(" + mb + "MB)。保存されない場合は下の画像を長押ししてください"
-          : r === "declined" ? "保存をキャンセルしました" : "下の画像を長押し(右クリック)して保存してください", r === "fallback");
+        var note = blob.reduced ? "。端末のメモリが足りないため、ひとつ小さいサイズで書き出しました" : "";
+        setMsg("saveMsg", (r === "saved" ? "保存しました(" + mb + "MB・位置情報なし)" : r === "started" ? "保存を始めました(" + mb + "MB)。保存されない場合は下の画像を長押ししてください"
+          : r === "declined" ? "保存をキャンセルしました" : "下の画像を長押し(右クリック)して保存してください") + note, r === "fallback");
       });
     }).catch(function () { setMsg("saveMsg", "書き出しに失敗しました。画質を「SNS向け」にして試してください", true); })
       .then(function () { lock(false); });
@@ -826,7 +1019,7 @@ progress { width: 100%; accent-color: var(--accent); }
     if (busy || items.length < 2) return;
     lock(true); $("outImg").hidden = true;
     var prog = $("prog"); prog.hidden = false; prog.max = items.length; prog.value = 0;
-    var entries = [], failed = 0;
+    var entries = [], failed = 0, reduced = 0;
     (function next(i) {
       if (i >= items.length) {
         prog.hidden = true;
@@ -834,7 +1027,7 @@ progress { width: 100%; accent-color: var(--accent); }
         var zip = buildZip(entries), mb = (zip.size / 1048576).toFixed(1);
         setMsg("saveMsg", "ZIPを用意しました(" + entries.length + "枚・" + mb + "MB)");
         offer(zip, "photo-cards.zip").then(function (r) {
-          var tail = failed ? "。" + failed + "枚は書き出せませんでした" : "";
+          var tail = (failed ? "。" + failed + "枚は書き出せませんでした" : "") + (reduced ? "。" + reduced + "枚はメモリ不足のため小さいサイズで書き出しました" : "");
           setMsg("saveMsg", (r === "saved" ? "保存しました(" + entries.length + "枚・" + mb + "MB)" : r === "started" ? "保存を始めました(" + entries.length + "枚・" + mb + "MB)"
             : r === "declined" ? "保存をキャンセルしました" : "この環境ではまとめて保存できません。1枚ずつ保存してください") + tail, r === "fallback" || failed > 0);
           lock(false);
@@ -842,10 +1035,10 @@ progress { width: 100%; accent-color: var(--accent); }
         return;
       }
       setMsg("saveMsg", "書き出し中 " + (i + 1) + "/" + items.length);
-      exportItem(items[i]).then(function (blob) { return blob.arrayBuffer(); })
+      exportItem(items[i]).then(function (blob) { if (blob.reduced) reduced++; return blob.arrayBuffer(); })
         .then(function (buf) { entries.push({ name: outName(items[i], i), data: new Uint8Array(buf) }); })
         .catch(function () { failed++; })
-        .then(function () { prog.value = i + 1; next(i + 1); });
+        .then(function () { prog.value = i + 1; setTimeout(function () { next(i + 1); }, 30); });
     })(0);
   });
 
@@ -876,7 +1069,7 @@ progress { width: 100%; accent-color: var(--accent); }
     });
   }
   segGroup("data-tpl", "tpl"); segGroup("data-ratio", "ratio"); segGroup("data-fit", "fit");
-  segGroup("data-shade", "shade"); segGroup("data-size", "size"); segGroup("data-fmt", "fmt");
+  segGroup("data-shade", "shade"); segGroup("data-size", "size"); segGroup("data-fmt", "fmt"); segGroup("data-frame", "frame");
   ["f-body", "f-lens", "f-exp", "f-focal", "f-date", "f-caption", "f-place"].forEach(function (id) { $(id).addEventListener("change", render); });
   FIELDS.forEach(function (k) {
     $("v-" + k).addEventListener("input", function () { if (items[cur]) { items[cur].vals[k] = $("v-" + k).value; render(); } });
